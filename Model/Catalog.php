@@ -31,6 +31,9 @@ use Magento\Store\Model\Store;
  */
 class Catalog
 {
+    /** Products read at a time. */
+    private const PAGE_SIZE = 500;
+
     public function __construct(
         private readonly ProductCollectionFactory $productCollectionFactory,
         private readonly CategoryCollectionFactory $categoryCollectionFactory,
@@ -44,7 +47,7 @@ class Catalog
      * @return array{
      *     shop: array{name: string, url: string, currency: string, date: string},
      *     categories: array<int, array{id: int, parent_id: int|null, name: string, level: int}>,
-     *     offers: array<int, array{id: string, group_id: string|null, sku: string, available: bool,
+     *     offers: iterable<array{id: string, group_id: string|null, sku: string, available: bool,
      *         url: string, price: float, old_price: float|null, category_id: int|null, pictures: string[],
      *         vendor: string, name: string, description: string, stock: int, params: array<string, string>,
      *         options: array<string, string>}>
@@ -106,10 +109,13 @@ class Catalog
     }
 
     /**
+     * The offers one by one, the products read PAGE_SIZE at a time: a catalogue of 100 000 products never sits in
+     * memory at once (it did, and the PHP worker was killed).
+     *
      * @param array<int, array{id: int}> $categories
-     * @return array<int, array<string, mixed>>
+     * @return \Generator<int, array<string, mixed>>
      */
-    private function offers(Store $store, array $categories, string $vendor): array
+    private function offers(Store $store, array $categories, string $vendor): \Generator
     {
         $collection = $this->productCollectionFactory->create()
             ->setStoreId((int) $store->getId())
@@ -123,49 +129,62 @@ class Catalog
             ->addUrlRewrite()
             ->addCategoryIds();
         $mediaUrl = rtrim((string) $store->getBaseUrl(UrlInterface::URL_TYPE_MEDIA), '/') . '/catalog/product';
-        $offers = [];
-        /** @var Product $product */
-        foreach ($collection as $product) {
-            $base = [
-                'url' => (string) $product->getProductUrl(),
-                'category_id' => $this->categoryOf($product, $categories),
-                'pictures' => $this->pictures($product, $mediaUrl),
-                'vendor' => trim((string) $product->getAttributeText('manufacturer')) ?: $vendor,
-                'name' => (string) $product->getName(),
-                'description' => trim((string) ($product->getDescription() ?: $product->getShortDescription())),
-            ];
-            if ($product->getTypeId() !== Configurable::TYPE_CODE) {
-                if ($product->isSaleable()) {
-                    $offers[] = $base + $this->offer($product, null, [], []);
-                }
-                continue;
-            }
-            /** @var Configurable $type */
-            $type = $product->getTypeInstance();
-            $attributes = [];
-            foreach ($type->getConfigurableAttributes($product) as $attribute) {
-                $code = (string) $attribute->getProductAttribute()->getAttributeCode();
-                $attributes[$code] = (string) ($attribute->getLabel()
-                    ?: $attribute->getProductAttribute()->getStoreLabel((int) $store->getId()));
-            }
-            foreach ($type->getUsedProducts($product) as $child) {
-                if (!$child->isSaleable()) {
-                    continue;
-                }
-                $params = [];
-                $options = [];
-                foreach ($attributes as $code => $label) {
-                    $value = (string) $child->getAttributeText($code);
-                    if ($value !== '') {
-                        $params[$label] = $value;
-                        $options[$code] = $value;
-                    }
-                }
-                $offers[] = $base + $this->offer($child, (string) $product->getId(), $params, $options);
+        $collection->setPageSize(self::PAGE_SIZE);
+        $pages = (int) $collection->getLastPageNumber();
+        for ($page = 1; $page <= $pages; $page++) {
+            $collection->setCurPage($page)->clear();
+            /** @var Product $product */
+            foreach ($collection as $product) {
+                yield from $this->productOffers($store, $product, $categories, $vendor, $mediaUrl);
             }
         }
+    }
 
-        return $offers;
+    /**
+     * A product's offers: itself, or a configurable product's salable children.
+     *
+     * @param array<int, array{id: int}> $categories
+     * @return \Generator<int, array<string, mixed>>
+     */
+    private function productOffers(Store $store, Product $product, array $categories, string $vendor, string $mediaUrl): \Generator
+    {
+        $base = [
+            'url' => (string) $product->getProductUrl(),
+            'category_id' => $this->categoryOf($product, $categories),
+            'pictures' => $this->pictures($product, $mediaUrl),
+            'vendor' => trim((string) $product->getAttributeText('manufacturer')) ?: $vendor,
+            'name' => (string) $product->getName(),
+            'description' => trim((string) ($product->getDescription() ?: $product->getShortDescription())),
+        ];
+        if ($product->getTypeId() !== Configurable::TYPE_CODE) {
+            if ($product->isSaleable()) {
+                yield $base + $this->offer($product, null, [], []);
+            }
+            return;
+        }
+        /** @var Configurable $type */
+        $type = $product->getTypeInstance();
+        $attributes = [];
+        foreach ($type->getConfigurableAttributes($product) as $attribute) {
+            $code = (string) $attribute->getProductAttribute()->getAttributeCode();
+            $attributes[$code] = (string) ($attribute->getLabel()
+                ?: $attribute->getProductAttribute()->getStoreLabel((int) $store->getId()));
+        }
+        foreach ($type->getUsedProducts($product) as $child) {
+            if (!$child->isSaleable()) {
+                continue;
+            }
+            $params = [];
+            $options = [];
+            foreach ($attributes as $code => $label) {
+                $value = (string) $child->getAttributeText($code);
+                if ($value !== '') {
+                    $params[$label] = $value;
+                    $options[$code] = $value;
+                }
+            }
+            yield $base + $this->offer($child, (string) $product->getId(), $params, $options);
+        }
     }
 
     /**

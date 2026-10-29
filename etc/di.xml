@@ -25,4 +25,11 @@
             </argument>
         </arguments>
     </type>
+    <type name="Magento\Framework\Console\CommandListInterface">
+        <arguments>
+            <argument name="commands" xsi:type="array">
+                <item name="zero_product_feed_generate" xsi:type="object">Zero\ProductFeed\Console\Command\GenerateCommand</item>
+            </argument>
+        </arguments>
+    </type>
 </config>

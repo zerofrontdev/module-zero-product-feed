@@ -102,6 +102,20 @@ class FormatsTest extends TestCase
         $this->assertSame('0.99', Yml::amount(0.99));
     }
 
+    public function testAFileFeedIsTheSameXmlWithOffersFromAGenerator(): void
+    {
+        $catalog = $this->catalog();
+        $memory = (new Google())->render($catalog);
+        $offers = $catalog['offers'];
+        $catalog['offers'] = (static function () use ($offers) {
+            yield from $offers;
+        })();
+        $file = tempnam(sys_get_temp_dir(), 'zero-feed');
+        $this->assertSame('', (new Google())->render($catalog, ['file' => $file]));
+        $this->assertSame($memory, (string) file_get_contents($file));
+        unlink($file);
+    }
+
     private function catalog(): array
     {
         $offer = [

@@ -28,7 +28,7 @@ class Yml implements FormatInterface
     {
         $shop = $catalog['shop'];
         $xml = new \XMLWriter();
-        $xml->openMemory();
+        Writer::open($xml, $options);
         $xml->setIndent(true);
         $xml->startDocument('1.0', 'UTF-8');
         $xml->startElement('yml_catalog');
@@ -58,6 +58,7 @@ class Yml implements FormatInterface
 
         $xml->startElement('offers');
         foreach ($catalog['offers'] as $offer) {
+            Writer::flushEvery($xml, $options);
             $xml->startElement('offer');
             $xml->writeAttribute('id', $offer['id']);
             $xml->writeAttribute('available', $offer['available'] ? 'true' : 'false');
@@ -96,7 +97,7 @@ class Yml implements FormatInterface
         $xml->endElement();
         $xml->endDocument();
 
-        return $xml->outputMemory();
+        return Writer::close($xml, $options);
     }
 
     /**

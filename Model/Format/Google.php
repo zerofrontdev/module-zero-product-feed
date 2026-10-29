@@ -30,7 +30,7 @@ class Google implements FormatInterface
         $shop = $catalog['shop'];
         $paths = $this->categoryPaths($catalog['categories']);
         $xml = new \XMLWriter();
-        $xml->openMemory();
+        Writer::open($xml, $options);
         $xml->setIndent(true);
         $xml->startDocument('1.0', 'UTF-8');
         $xml->startElement('rss');
@@ -41,13 +41,14 @@ class Google implements FormatInterface
         $xml->writeElement('link', $shop['url']);
         $xml->writeElement('description', $shop['name']);
         foreach ($catalog['offers'] as $offer) {
+            Writer::flushEvery($xml, $options);
             $this->item($xml, $offer, $shop['currency'], $paths);
         }
         $xml->endElement();
         $xml->endElement();
         $xml->endDocument();
 
-        return $xml->outputMemory();
+        return Writer::close($xml, $options);
     }
 
     /**

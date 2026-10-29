@@ -14,7 +14,8 @@ namespace Zero\ProductFeed\Model\Format;
 interface FormatInterface
 {
     /**
-     * @param array{shop: array, categories: array, offers: array} $catalog Model\Catalog::build()
+     * @param array{shop: array, categories: array, offers: iterable} $catalog Model\Catalog::build()
+     * @param array<string, mixed> $options the format's own, and `file`: write there (Format\Writer) and return ''
      */
     public function render(array $catalog, array $options = []): string;
 }

@@ -23,7 +23,7 @@ class Hotline implements FormatInterface
     {
         $shop = $catalog['shop'];
         $xml = new \XMLWriter();
-        $xml->openMemory();
+        Writer::open($xml, $options);
         $xml->setIndent(true);
         $xml->startDocument('1.0', 'UTF-8');
         $xml->startElement('price');
@@ -45,6 +45,7 @@ class Hotline implements FormatInterface
 
         $xml->startElement('items');
         foreach ($catalog['offers'] as $offer) {
+            Writer::flushEvery($xml, $options);
             $xml->startElement('item');
             $xml->writeElement('id', $offer['id']);
             if ($offer['category_id'] !== null) {
@@ -77,6 +78,6 @@ class Hotline implements FormatInterface
         $xml->endElement();
         $xml->endDocument();
 
-        return $xml->outputMemory();
+        return Writer::close($xml, $options);
     }
 }
