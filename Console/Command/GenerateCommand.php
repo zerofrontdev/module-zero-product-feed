@@ -50,14 +50,20 @@ class GenerateCommand extends Command
         $this->objectManager->configure($this->configLoader->load(Area::AREA_FRONTEND));
         $code = $input->getArgument('code');
         $count = 0;
-        $this->feed->generateAll($code ? (string) $code : null, function (string $c, $store, int $bytes, float $s) use ($output, &$count): void {
-            $count++;
-            $output->writeln(sprintf('%s for %s: %d KB in %.1f s', $c, $store->getCode(), $bytes / 1024, $s));
-        });
-        if ($count === 0) {
+        $failures = $this->feed->generateAll(
+            $code ? (string) $code : null,
+            function (string $c, $store, int $bytes, float $s) use ($output, &$count): void {
+                $count++;
+                $output->writeln(sprintf('%s for %s: %d KB in %.1f s', $c, $store->getCode(), $bytes / 1024, $s));
+            },
+            function (string $c, $store, \Throwable $e) use ($output): void {
+                $output->writeln(sprintf('<error>%s for %s was not written: %s</error>', $c, $store->getCode(), $e->getMessage()));
+            }
+        );
+        if ($count === 0 && $failures === 0) {
             $output->writeln('No feed is on (Stores > Configuration > Zero > Product Feeds).');
         }
 
-        return Command::SUCCESS;
+        return $failures > 0 ? Command::FAILURE : Command::SUCCESS;
     }
 }

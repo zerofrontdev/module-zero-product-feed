@@ -21,6 +21,7 @@ class Hotline implements FormatInterface
      */
     public function render(array $catalog, array $options = []): string
     {
+        $catalog = Writer::cleanCatalog($catalog);
         $shop = $catalog['shop'];
         $xml = new \XMLWriter();
         Writer::open($xml, $options);

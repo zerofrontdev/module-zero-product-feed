@@ -8,13 +8,17 @@ declare(strict_types=1);
 
 namespace Zero\ProductFeed\Test\Unit\Model\Format;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Zero\ProductFeed\Model\Format\FormatInterface;
 use Zero\ProductFeed\Model\Format\Google;
 use Zero\ProductFeed\Model\Format\Hotline;
+use Zero\ProductFeed\Model\Format\Writer;
 use Zero\ProductFeed\Model\Format\Yml;
 
 /**
- * The marketplaces' XML from the catalog's data: YML (Rozetka, Prom.ua) and Hotline.
+ * The marketplaces' XML from the catalog's data: YML (Rozetka, Prom.ua) and Hotline; characters XML 1.0 forbids
+ * never reach any of them.
  */
 class FormatsTest extends TestCase
 {
@@ -114,6 +118,107 @@ class FormatsTest extends TestCase
         $this->assertSame('', (new Google())->render($catalog, ['file' => $file]));
         $this->assertSame($memory, (string) file_get_contents($file));
         unlink($file);
+    }
+
+    /**
+     * @return array<string, array{0: \Closure(): FormatInterface, 1: string[]}> the format, the texts it carries
+     */
+    public static function formats(): array
+    {
+        $all = ['N1ab', 'D1ab', 'V1ab', 'P1ab', 'Q1ab', 'C1ab'];
+
+        return [
+            'rozetka' => [static fn () => new Yml('price_old'), $all],
+            'prom' => [static fn () => new Yml('oldprice'), $all],
+            'hotline' => [static fn () => new Hotline(), $all],
+            // Google has no param names: the values go into the title
+            'google' => [static fn () => new Google(), ['N1ab', 'D1ab', 'V1ab', 'Q1ab', 'C1ab']],
+        ];
+    }
+
+    /**
+     * @param \Closure(): FormatInterface $format
+     * @param string[] $texts
+     */
+    #[DataProvider('formats')]
+    public function testControlCharactersNeverReachTheXml(\Closure $format, array $texts): void
+    {
+        $catalog = $this->catalog();
+        $catalog['categories'][1]['name'] = "C1a\x0Bb";
+        $catalog['shop']['name'] = "Shop\x01";
+        foreach ($catalog['offers'] as &$offer) {
+            $offer['name'] = "N1a\x0Bb";
+            $offer['description'] = "<p>D1a\x0Bb</p>";
+            $offer['vendor'] = "V1a\x0Bb";
+            $offer['params'] = ["P1a\x0Bb" => "Q1a\x0Bb"];
+        }
+        unset($offer);
+
+        $out = $format()->render($catalog, ['firm_id' => '1']);
+
+        $this->assertNotFalse($this->parse($out), 'the feed is well-formed XML');
+        $this->assertStringNotContainsString("\x0B", $out);
+        $this->assertStringNotContainsString("\x01", $out);
+        foreach ($texts as $text) {
+            $this->assertStringContainsString($text, $out);
+        }
+    }
+
+    public function testBrokenUtf8IsScrubbed(): void
+    {
+        foreach ([new Yml(), new Hotline(), new Google()] as $format) {
+            $catalog = $this->catalog();
+            $catalog['offers'][0]['name'] = "Bad \xC3\x28 name";
+
+            $out = $format->render($catalog, ['firm_id' => '1']);
+
+            $this->assertNotFalse($this->parse($out), get_class($format));
+            $this->assertStringContainsString('Bad ?( name', $out, get_class($format));
+        }
+    }
+
+    public function testCleanKeepsValidTextAsItIs(): void
+    {
+        $valid = "Tab\tline\nCR\r Тепло & ]]> 😀 \u{E000} \u{FFFD}";
+        $this->assertSame($valid, Writer::clean($valid));
+        $this->assertSame('ab', Writer::clean("a\u{FFFE}\u{FFFF}\x00\x1Fb"));
+        $this->assertSame('', Writer::clean(''));
+        $catalog = $this->catalog();
+        $cleaned = Writer::cleanCatalog($catalog);
+        $this->assertSame($catalog['shop'], $cleaned['shop']);
+        $this->assertSame($catalog['categories'], $cleaned['categories']);
+        $this->assertSame($catalog['offers'], iterator_to_array($cleaned['offers']));
+    }
+
+    public function testCleanedOffersAreReadOnlyWhenTheFormatReadsThem(): void
+    {
+        $read = 0;
+        $catalog = $this->catalog();
+        $offers = $catalog['offers'];
+        $catalog['offers'] = (static function () use ($offers, &$read) {
+            foreach ($offers as $offer) {
+                $read++;
+                yield $offer + ['params' => []];
+            }
+        })();
+
+        $cleaned = Writer::cleanCatalog($catalog);
+
+        $this->assertSame(0, $read, 'nothing read yet');
+        $this->assertInstanceOf(\Generator::class, $cleaned['offers']);
+        $cleaned['offers']->current();
+        $this->assertSame(1, $read, 'one offer at a time');
+    }
+
+    private function parse(string $xml): \SimpleXMLElement|false
+    {
+        $previous = libxml_use_internal_errors(true);
+        try {
+            return simplexml_load_string($xml);
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
     }
 
     private function catalog(): array

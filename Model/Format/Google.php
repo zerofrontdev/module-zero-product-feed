@@ -27,6 +27,7 @@ class Google implements FormatInterface
      */
     public function render(array $catalog, array $options = []): string
     {
+        $catalog = Writer::cleanCatalog($catalog);
         $shop = $catalog['shop'];
         $paths = $this->categoryPaths($catalog['categories']);
         $xml = new \XMLWriter();

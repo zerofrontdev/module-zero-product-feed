@@ -81,39 +81,62 @@ class Feed
         $path = $this->path($code, (int) $store->getId());
         $this->filesystem->getDirectoryWrite(DirectoryList::VAR_DIR)->create(self::DIR);
         $tmp = $path . '.' . getmypid() . '.tmp';
-        $this->formats[$code]->render($this->catalog->build($store), [
-            'firm_id' => (string) $this->scopeConfig->getValue(
-                'zero_product_feed/hotline/firm_id',
-                ScopeInterface::SCOPE_STORE,
-                (int) $store->getId()
-            ),
-            'file' => $tmp,
-        ]);
-        rename($tmp, $path);
+        try {
+            $this->formats[$code]->render($this->catalog->build($store), [
+                'firm_id' => (string) $this->scopeConfig->getValue(
+                    'zero_product_feed/hotline/firm_id',
+                    ScopeInterface::SCOPE_STORE,
+                    (int) $store->getId()
+                ),
+                'file' => $tmp,
+            ]);
+            if (!rename($tmp, $path)) {
+                throw new \RuntimeException('Cannot move ' . $tmp . ' to ' . $path);
+            }
+        } finally {
+            // A feed that failed half way leaves no temporary file behind.
+            if (is_file($tmp)) {
+                unlink($tmp);
+            }
+        }
 
         return (int) filesize($path);
     }
 
     /**
-     * Every feed that is on, in every store view: the cron's and the command's work.
+     * Every feed that is on, in every store view: the cron's and the command's work. A feed that fails is told to
+     * $failed and the others are still written.
      *
      * @param callable(string, Store, int, float): void|null $done told after each feed (code, store, bytes, seconds)
+     * @param callable(string, Store, \Throwable): void|null $failed told after each feed that failed (code, store, error)
+     * @return int how many feeds failed
      */
-    public function generateAll(?string $only = null, ?callable $done = null): void
+    public function generateAll(?string $only = null, ?callable $done = null, ?callable $failed = null): int
     {
+        $failures = 0;
         foreach ($this->storeManager->getStores() as $store) {
             foreach (array_keys($this->formats) as $code) {
                 if (($only !== null && $only !== $code) || !$this->isEnabled($code, (int) $store->getId())) {
                     continue;
                 }
                 $start = microtime(true);
-                $this->storeManager->setCurrentStore($store->getId());
-                $bytes = $this->generate($code, $store);
+                try {
+                    $this->storeManager->setCurrentStore($store->getId());
+                    $bytes = $this->generate($code, $store);
+                } catch (\Throwable $e) {
+                    $failures++;
+                    if ($failed) {
+                        $failed($code, $store, $e);
+                    }
+                    continue;
+                }
                 if ($done) {
                     $done($code, $store, $bytes, microtime(true) - $start);
                 }
             }
         }
+
+        return $failures;
     }
 
     public function path(string $code, int $storeId): string
