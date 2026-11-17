@@ -9,9 +9,8 @@ declare(strict_types=1);
 namespace Zero\ProductFeed\Console\Command;
 
 use Magento\Framework\App\Area;
+use Magento\Framework\App\AreaList;
 use Magento\Framework\App\State;
-use Magento\Framework\ObjectManager\ConfigLoaderInterface;
-use Magento\Framework\ObjectManagerInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
@@ -26,8 +25,7 @@ class GenerateCommand extends Command
     public function __construct(
         private readonly Feed $feed,
         private readonly State $state,
-        private readonly ObjectManagerInterface $objectManager,
-        private readonly ConfigLoaderInterface $configLoader
+        private readonly AreaList $areaList
     ) {
         parent::__construct();
     }
@@ -47,7 +45,7 @@ class GenerateCommand extends Command
         } catch (\Throwable) {
             // already set
         }
-        $this->objectManager->configure($this->configLoader->load(Area::AREA_FRONTEND));
+        $this->areaList->getArea(Area::AREA_FRONTEND)->load(Area::PART_CONFIG);
         $code = $input->getArgument('code');
         $count = 0;
         $failures = $this->feed->generateAll(

@@ -8,9 +8,9 @@ declare(strict_types=1);
 
 namespace Zero\ProductFeed\Test\Unit\Console\Command;
 
+use Magento\Framework\App\Area;
+use Magento\Framework\App\AreaList;
 use Magento\Framework\App\State;
-use Magento\Framework\ObjectManager\ConfigLoaderInterface;
-use Magento\Framework\ObjectManagerInterface;
 use Magento\Store\Model\Store;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Command\Command;
@@ -71,6 +71,14 @@ class GenerateCommandTest extends TestCase
         $this->assertStringNotContainsString('No feed is on', $text);
     }
 
+    public function testTheFrontendAreaConfigIsLoadedThroughTheAreaList(): void
+    {
+        // runCommand() expects exactly one getArea('frontend') and one load('config').
+        [$code] = $this->runCommand(static fn () => 0);
+
+        $this->assertSame(Command::SUCCESS, $code);
+    }
+
     public function testNothingOnSaysSoAndSucceeds(): void
     {
         [$code, $text] = $this->runCommand(static fn () => 0);
@@ -104,13 +112,14 @@ class GenerateCommandTest extends TestCase
         $feed = $this->createStub(Feed::class);
         $feed->method('codes')->willReturn(['google', 'hotline']);
         $feed->method('generateAll')->willReturnCallback($generateAll);
-        $loader = $this->createStub(ConfigLoaderInterface::class);
-        $loader->method('load')->willReturn([]);
+        $area = $this->createMock(Area::class);
+        $area->expects($this->once())->method('load')->with(Area::PART_CONFIG);
+        $areaList = $this->createMock(AreaList::class);
+        $areaList->expects($this->once())->method('getArea')->with(Area::AREA_FRONTEND)->willReturn($area);
         $command = new GenerateCommand(
             $feed,
             $this->createStub(State::class),
-            $this->createStub(ObjectManagerInterface::class),
-            $loader
+            $areaList
         );
         $output = new BufferedOutput();
         $code = $command->run(new ArrayInput($args), $output);
